@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FinSight Phase 1 — Manual Setup Guide</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #555; --teal: #17838c;
+    --code-bg: #f4f6f7; --border: #ddd; --check-bg: #eef7ee; --check-border: #4a9;
+    --warn-bg: #fff6e8; --warn-border: #d90;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181a; --fg: #e6e6e6; --muted: #9aa; --teal: #3fb6bf;
+      --code-bg: #22262a; --border: #3a3f44; --check-bg: #1c2b1e; --check-border: #4a9;
+      --warn-bg: #2e2617; --warn-border: #b80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 860px; padding: 2rem 1.2rem 6rem;
+         font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--fg); }
+  h1 { color: var(--teal); font-size: 1.9rem; margin-bottom: .2rem; }
+  h2 { color: var(--teal); margin-top: 2.6rem; border-bottom: 2px solid var(--teal);
+       padding-bottom: .25rem; font-size: 1.35rem; }
+  h3 { margin-top: 1.6rem; font-size: 1.08rem; }
+  .subtitle { color: var(--muted); margin-top: 0; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+        padding: .85rem 1rem; overflow-x: auto; font-size: .86rem; line-height: 1.5; }
+  code { font-family: ui-monospace, Consolas, monospace; background: var(--code-bg);
+         padding: .1em .35em; border-radius: 4px; font-size: .9em; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  th, td { border: 1px solid var(--border); padding: .5rem .7rem; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  .box { border-left: 4px solid; border-radius: 6px; padding: .7rem 1rem; margin: 1rem 0; }
+  .check { background: var(--check-bg); border-color: var(--check-border); }
+  .check::before { content: "✅ CHECKPOINT — "; font-weight: 700; }
+  .warn { background: var(--warn-bg); border-color: var(--warn-border); }
+  .warn::before { content: "⚠️ "; }
+  .why { color: var(--muted); font-style: italic; margin: .4rem 0 1rem; }
+  nav { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+        padding: 1rem 1.4rem; margin-top: 1.5rem; }
+  nav a { color: var(--teal); text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  nav ol { margin: .4rem 0 0; padding-left: 1.2rem; }
+  .overflow { overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>FinSight Phase 1 — Manual Setup Guide</h1>
+<p class="subtitle">Build the entire ingestion + RAG pipeline yourself, by hand, on a blank Windows machine.
+Every command, every expected output, and the <em>why</em> behind each step.</p>
+
+<nav>
+<strong>Contents</strong>
+<ol>
+  <li><a href="#s1">Install the prerequisites</a></li>
+  <li><a href="#s2">Get the code &amp; create the Python environment</a></li>
+  <li><a href="#s3">Start the database (Docker + Postgres + pgvector)</a></li>
+  <li><a href="#s4">Configure secrets (.env)</a></li>
+  <li><a href="#s5">Run the data pipeline: extraction → preprocessing → chunking</a></li>
+  <li><a href="#s6">Inspect what the pipeline produced</a></li>
+  <li><a href="#s7">Embed the chunks into the database</a></li>
+  <li><a href="#s8">Ask questions — the cited RAG CLI</a></li>
+  <li><a href="#s9">Daily restart routine</a></li>
+  <li><a href="#s10">Troubleshooting</a></li>
+</ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="s1">1 · Install the prerequisites</h2>
+
+<table>
+<tr><th>Tool</th><th>How to install</th><th>Verify with</th></tr>
+<tr><td>Python 3.12+</td><td>python.org or Microsoft Store</td><td><code>python --version</code></td></tr>
+<tr><td>Git</td><td>git-scm.com</td><td><code>git --version</code></td></tr>
+<tr><td>Docker Desktop</td><td>docker.com/products/docker-desktop, or in an <em>admin</em> PowerShell:<br>
+<code>winget install Docker.DockerDesktop</code></td><td><code>docker --version</code></td></tr>
+</table>
+
+<div class="box warn">Installing Docker Desktop is not enough — the <strong>application must be
+running</strong> for any <code>docker</code> command to work. Launch it from the Start menu and wait
+until the whale icon in the system tray stops animating. If you ever see
+<code>failed to connect to the docker API at npipe:...</code>, the app isn't running.</div>
+
+<!-- ============================================================ -->
+<h2 id="s2">2 · Get the code &amp; create the Python environment</h2>
+
+<pre><code>git clone https://github.com/st186/finsight.git
+cd finsight
+
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt</code></pre>
+
+<p class="why">Why a venv: the project pins its own library versions (httpx, beautifulsoup4, lxml,
+openai, psycopg, pgvector) isolated from anything else on your machine.</p>
+
+<div class="box check">
+<code>.venv\Scripts\python -c "import httpx, bs4, lxml, openai, psycopg, pgvector; print('deps ok')"</code>
+should print <code>deps ok</code>.</div>
+
+<div class="box warn">On Windows, always run project scripts as
+<code>.venv\Scripts\python -X utf8 ...</code>. SEC filings are full of curly quotes; without
+<code>-X utf8</code> the console shows them as <code>�</code> (a display issue that looks like a data bug but isn't).</div>
+
+<!-- ============================================================ -->
+<h2 id="s3">3 · Start the database (Docker + Postgres + pgvector)</h2>
+
+<p>The vector store is ordinary Postgres 16 with the <strong>pgvector</strong> extension,
+declared in <code>infra/docker-compose.yml</code>. Three things worth understanding before you run it:</p>
+
+<ul>
+<li><strong>The image</strong> <code>pgvector/pgvector:pg16</code> is official Postgres with the extension
+pre-installed — nothing to compile.</li>
+<li><strong>The schema applies itself.</strong> The compose file mounts <code>infra/schema.sql</code> into
+<code>/docker-entrypoint-initdb.d/</code>; Postgres executes anything in that folder
+<em>on first boot with an empty data volume</em>. That's why you never run a migration by hand.</li>
+<li><strong>Data survives restarts</strong> in the named volume <code>finsight_pgdata</code>.</li>
+</ul>
+
+<pre><code>docker compose -f infra/docker-compose.yml up -d</code></pre>
+
+<p>First run downloads the image (~150 MB), then starts a container named <code>finsight-db</code>
+listening on <code>localhost:5432</code> (user/password/db all <code>finsight</code>).</p>
+
+<div class="box check">
+<code>docker exec finsight-db psql -U finsight -d finsight -c "\d chunks"</code>
+should print the <code>chunks</code> table definition, including a
+<code>embedding | vector(3072)</code> column and a generated <code>tsv | tsvector</code> column.</div>
+
+<h3>What the schema means</h3>
+<div class="overflow">
+<table>
+<tr><th>Column(s)</th><th>Purpose</th></tr>
+<tr><td><code>ticker, form, period, item, seq</code></td><td>Metadata for SQL filtering; together they form a <code>UNIQUE</code> constraint so re-loading never duplicates rows (idempotent loads)</td></tr>
+<tr><td><code>citation</code></td><td>Pre-built source label, e.g. <code>[JPM 10-K 2025, Item 1A]</code> — travels with the chunk into the final answer</td></tr>
+<tr><td><code>text</code></td><td>The chunk content, metadata header included</td></tr>
+<tr><td><code>embedding vector(3072)</code></td><td>The semantic vector. No ANN index on purpose: pgvector indexes cap at 2000 dims; at this scale a sequential scan is milliseconds</td></tr>
+<tr><td><code>tsv tsvector</code> + GIN index</td><td>Pre-built full-text column for Phase 2's BM25 hybrid search — costs nothing now</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s4">4 · Configure secrets (.env)</h2>
+
+<pre><code>copy .env.example .env</code></pre>
+
+<p>Open <code>.env</code> and fill in:</p>
+
+<pre><code># Identify yourself to the SEC (their policy — they block anonymous scrapers)
+EDGAR_USER_AGENT="FinSight research project your.email@example.com"
+
+# From Azure Portal → your Azure OpenAI resource → Keys and Endpoint
+AZURE_OPENAI_ENDPOINT="https://&lt;your-resource&gt;.openai.azure.com/"
+AZURE_OPENAI_API_KEY="&lt;KEY 1&gt;"
+
+# Must match the deployment NAMES you created in Azure AI Foundry
+AZURE_OPENAI_CHAT_DEPLOYMENT="gpt-5-mini"
+AZURE_OPENAI_MINI_DEPLOYMENT="gpt-5-mini"
+AZURE_OPENAI_EMBED_DEPLOYMENT="text-embedding-3-large"
+
+# Matches the docker-compose defaults — leave as is
+DATABASE_URL="postgresql://finsight:finsight@localhost:5432/finsight"</code></pre>
+
+<p class="why">Azure side (once, in the portal): create an <em>Azure OpenAI</em> resource →
+open Azure AI Foundry → Deployments → deploy one chat model and one embedding model.
+Deployment <em>names</em> are labels you choose; the code only ever sees the label, so a future
+model upgrade is a one-line .env edit. Note: flagship models often have zero quota on free-trial
+subscriptions — a mini-class chat model deploys fine and is enough for Phase 1.</p>
+
+<div class="box warn"><code>.env</code> is listed in <code>.gitignore</code>. Never commit it,
+never paste the key anywhere. If a key leaks: Keys and Endpoint → Regenerate.</div>
+
+<div class="box check">Smoke-test the Azure wiring:
+<pre><code>.venv\Scripts\python -X utf8 -c "from ingestion.embedder import get_openai, embed_texts; print(len(embed_texts(get_openai(), ['test'])[0]), 'dims ok')"</code></pre>
+Expected: <code>3072 dims ok</code>.</div>
+
+<!-- ============================================================ -->
+<h2 id="s5">5 · Run the data pipeline: extraction → preprocessing → chunking</h2>
+
+<p><strong>This step needs no API key and costs nothing</strong> — it only talks to the free SEC EDGAR API.</p>
+
+<pre><code>.venv\Scripts\python -X utf8 -m ingestion.pipeline JPM BAC --forms 10-K</code></pre>
+
+<div class="box check">Expected output (report dates may differ):
+<pre><code>JPM: 1 filings
+  10-K 2025-12-31: 12 sections -&gt; 475 chunks
+BAC: 1 filings
+  10-K 2025-12-31: 16 sections -&gt; 256 chunks</code></pre></div>
+
+<p>What just happened, stage by stage:</p>
+
+<h3>5a · Extraction (ingestion/edgar_client.py)</h3>
+<ol>
+<li>Downloads SEC's <code>company_tickers.json</code> to map ticker → CIK (the SEC's company ID: JPM → 19617).</li>
+<li>Fetches <code>data.sec.gov/submissions/CIK0000019617.json</code> — the company's filing index — and
+filters to the requested forms and date range.</li>
+<li>Downloads each filing's primary document into <code>data/raw/&lt;TICKER&gt;/</code>
+(JPM's FY2025 10-K is ~12.9 MB of inline-XBRL HTML) with a JSON sidecar of filing metadata.</li>
+</ol>
+<p class="why">Compliance details baked in: a real User-Agent header (SEC requirement) and a
+throttle keeping requests under ~8/second (SEC caps at 10/s). Downloads are cached — rerunning is instant.</p>
+
+<h3>5b · Preprocessing (ingestion/parser.py)</h3>
+<ol>
+<li><strong>HTML → text:</strong> strips <code>&lt;script&gt;/&lt;style&gt;</code>, then flattens every
+<code>&lt;table&gt;</code> into pipe-separated rows — <code>Provision for credit losses | 9,320 | 6,899</code> —
+so a number keeps its row label as context. Whitespace is collapsed but line breaks kept (heading detection needs them).</li>
+<li><strong>Text → named sections:</strong> a regex finds <code>Item N.</code> headings
+(Item 1A = Risk Factors, Item 7 = MD&amp;A…). The trap: every item also appears in the table of contents.
+Fix: a match with &lt;200 chars of body before the next match is a TOC entry — dropped; if an item still
+matches twice, the longest occurrence wins.</li>
+</ol>
+<div class="box warn">Known quirk: JPMorgan "incorporates by reference" — its MD&amp;A and financial
+statements physically live inside a ~1M-char blob after Item 15. The content <em>is</em> indexed,
+just labeled Item 15. Documented in the README; fixing the labeling is Phase 2 fodder.</div>
+
+<h3>5c · Chunking (ingestion/chunker.py)</h3>
+<ol>
+<li>Each section splits into ~4,000-char chunks on <strong>paragraph boundaries</strong>
+(never mid-sentence), with a one-paragraph overlap between consecutive chunks so boundary sentences
+are never orphaned.</li>
+<li>Every chunk is prefixed with a metadata header the embedding model will see:
+<pre><code>[JPM | 10-K FY2025 | Item 1A: Risk Factors]</code></pre></li>
+<li>Every chunk carries a ready-made citation string: <code>[JPM 10-K 2025, Item 1A]</code>.</li>
+</ol>
+<p class="why">Why not fixed-size chunking: it slices through tables and section boundaries,
+destroying the context that makes a passage retrievable. Section-aware chunking with metadata
+headers is the single highest-leverage design decision in Phase 1.</p>
+
+<!-- ============================================================ -->
+<h2 id="s6">6 · Inspect what the pipeline produced</h2>
+
+<p>Output lands as JSON-lines files, one per filing, in <code>data/parsed/</code>:</p>
+
+<pre><code>dir data\parsed
+:: JPM_10-K_2025-12-31.jsonl   BAC_10-K_2025-12-31.jsonl</code></pre>
+
+<p>Look at one chunk (each line is one JSON object):</p>
+
+<pre><code>.venv\Scripts\python -X utf8 -c "import json; c=json.loads(open('data/parsed/JPM_10-K_2025-12-31.jsonl',encoding='utf-8').readline()); print(json.dumps({k:(v[:200]+'...' if k=='text' else v) for k,v in c.items()}, indent=2))"</code></pre>
+
+<div class="box check">You should see fields <code>ticker, form, period, fiscal_label, item,
+section_name, seq, text, citation</code> — and <code>text</code> starting with the
+<code>[JPM | 10-K FY2025 | ...]</code> metadata header.</div>
+
+<!-- ============================================================ -->
+<h2 id="s7">7 · Embed the chunks into the database</h2>
+
+<pre><code>.venv\Scripts\python -X utf8 -m ingestion.embedder</code></pre>
+
+<p>For each <code>.jsonl</code> file this batches chunks (64 at a time) to the embedding model and inserts
+rows with <code>ON CONFLICT DO NOTHING</code> — so rerunning after a crash resumes safely.</p>
+
+<div class="box warn">On free-trial rate limits this takes <strong>10+ minutes</strong> for ~700 chunks and
+prints nothing while working — it is not stuck; the SDK is silently backing off on 429 (rate-limit)
+responses. Watch progress from another terminal:
+<pre><code>docker exec finsight-db psql -U finsight -d finsight -c "SELECT ticker, count(*) FROM chunks GROUP BY ticker;"</code></pre></div>
+
+<div class="box check">When finished, the count query above shows JPM 475, BAC 256 (or similar for
+your filing vintages), and the embedder printed one "<code>N new chunks embedded</code>" line per file.</div>
+
+<!-- ============================================================ -->
+<h2 id="s8">8 · Ask questions — the cited RAG CLI</h2>
+
+<pre><code>.venv\Scripts\python -X utf8 rag_cli.py "What cybersecurity risks did JPMorgan flag?" --tickers JPM</code></pre>
+
+<p>Flow: your question is embedded with the <em>same</em> model → cosine-distance search in pgvector
+(<code>ORDER BY embedding &lt;=&gt; query</code>) filtered to JPM → the top 8 chunks are pasted into a
+prompt whose rules are: use <em>only</em> this evidence, cite every claim, refuse if the evidence
+doesn't answer.</p>
+
+<div class="box check">Expected: a multi-bullet answer where <em>every bullet</em> ends in a citation like
+<code>[JPM 10-K 2025, Item 1A]</code>, followed by the retrieved sources with similarity scores (~0.65–0.75).</div>
+
+<p>Now the trust test — ask something the index cannot answer:</p>
+
+<pre><code>.venv\Scripts\python -X utf8 rag_cli.py "What did Tesla say about vehicle recall risks?" --tickers JPM BAC</code></pre>
+
+<div class="box check">Expected: <em>"Insufficient evidence in the indexed filings."</em> plus an explanation
+of what's missing — and retrieval scores collapsing to ~0.25. The system refuses rather than hallucinates.
+This behavior is the entire point of the architecture.</div>
+
+<!-- ============================================================ -->
+<h2 id="s9">9 · Daily restart routine</h2>
+
+<p>After a reboot, only one thing needs manual attention:</p>
+<ol>
+<li>Start <strong>Docker Desktop</strong>, wait for it to finish loading.</li>
+<li><code>docker start finsight-db</code> (or the compose <code>up -d</code> command again).</li>
+</ol>
+<p class="why">Everything else persists: the venv, <code>.env</code>, downloaded filings in
+<code>data/</code>, and all database rows in the <code>finsight_pgdata</code> volume. Azure deployments
+are pay-per-token — idle costs nothing.</p>
+
+<!-- ============================================================ -->
+<h2 id="s10">10 · Troubleshooting</h2>
+
+<div class="overflow">
+<table>
+<tr><th>Symptom</th><th>Cause → Fix</th></tr>
+<tr><td><code>failed to connect to the docker API at npipe:...</code></td><td>Docker Desktop app not running → launch it and wait for full startup</td></tr>
+<tr><td><code>psycopg.OperationalError: connection failed</code></td><td>Container stopped → <code>docker start finsight-db</code></td></tr>
+<tr><td><code>401</code> from Azure OpenAI</td><td>Wrong key/endpoint in <code>.env</code>, or the key was regenerated → re-copy from Keys and Endpoint</td></tr>
+<tr><td><code>404 DeploymentNotFound</code></td><td>Deployment names in <code>.env</code> don't match the names you typed in Azure AI Foundry</td></tr>
+<tr><td>Embedder appears frozen</td><td>Trial-tier rate limit; SDK retrying 429s → wait, watch the row-count query</td></tr>
+<tr><td><code>�</code> characters in output</td><td>Console codepage display issue → run with <code>python -X utf8</code></td></tr>
+<tr><td>Changed <code>schema.sql</code> but nothing happened</td><td>Init scripts run only on an empty volume → apply via <code>psql</code>, or destroy and rebuild: <code>docker compose -f infra/docker-compose.yml down -v</code> then <code>up -d</code> (deletes all rows — re-run the embedder)</td></tr>
+<tr><td>EDGAR returns <code>403</code></td><td><code>EDGAR_USER_AGENT</code> missing a real contact email → SEC blocks anonymous clients</td></tr>
+</table>
+</div>
+
+<p style="margin-top:3rem; color: var(--muted); font-size:.9rem;">
+FinSight Phase 1 · <a style="color:var(--teal)" href="https://github.com/st186/finsight">github.com/st186/finsight</a> ·
+Companion deep-dive: <code>notebooks/phase1_walkthrough.ipynb</code></p>
+
+</body>
+</html>
