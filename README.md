@@ -55,6 +55,8 @@ key in `.env`.
 
 ## Documentation
 
+- [docs/PRD.md](docs/PRD.md) — product requirements: personas, AI quality
+  targets, risk register, launch gates
 - [docs/SETUP.md](docs/SETUP.md) — full environment/architecture replication
   guide (Docker, database, Azure OpenAI, `.env`, troubleshooting)
 - [docs/adr/](docs/adr/) — Architecture Decision Records
