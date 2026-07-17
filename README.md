@@ -60,8 +60,12 @@ key in `.env`.
 - [docs/SETUP.md](docs/SETUP.md) — full environment/architecture replication
   guide (Docker, database, Azure OpenAI, `.env`, troubleshooting)
 - [docs/adr/](docs/adr/) — Architecture Decision Records
+- [notebooks/phase1_deepdive.ipynb](notebooks/phase1_deepdive.ipynb) —
+  **start here if you're new to RAG/vector DBs.** Spoon-fed Phase 1 from
+  scratch: concept explainers, before/after for every transformation, real
+  raw data, live DB inspection
 - [notebooks/phase1_walkthrough.ipynb](notebooks/phase1_walkthrough.ipynb) —
-  step-by-step Phase 1 walkthrough with raw data visible at every stage
+  the concise version for readers already comfortable with RAG
 
 ## Repository layout
 
