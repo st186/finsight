@@ -9,12 +9,14 @@
     --bg: #ffffff; --fg: #1a1a1a; --muted: #555; --teal: #17838c;
     --code-bg: #f4f6f7; --border: #ddd; --check-bg: #eef7ee; --check-border: #4a9;
     --warn-bg: #fff6e8; --warn-border: #d90;
+    --concept-bg: #eef4fb; --concept-border: #3b7fd0;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #16181a; --fg: #e6e6e6; --muted: #9aa; --teal: #3fb6bf;
       --code-bg: #22262a; --border: #3a3f44; --check-bg: #1c2b1e; --check-border: #4a9;
       --warn-bg: #2e2617; --warn-border: #b80;
+      --concept-bg: #16232f; --concept-border: #3b7fd0;
     }
   }
   * { box-sizing: border-box; }
@@ -39,7 +41,10 @@
   .check::before { content: "✅ CHECKPOINT — "; font-weight: 700; }
   .warn { background: var(--warn-bg); border-color: var(--warn-border); }
   .warn::before { content: "⚠️ "; }
+  .concept { background: var(--concept-bg); border-color: var(--concept-border); }
+  .concept h3 { margin-top: .3rem; }
   .why { color: var(--muted); font-style: italic; margin: .4rem 0 1rem; }
+  .analogy { color: var(--concept-border); font-weight: 600; }
   nav { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
         padding: 1rem 1.4rem; margin-top: 1.5rem; }
   nav a { color: var(--teal); text-decoration: none; }
@@ -52,11 +57,20 @@
 
 <h1>FinSight Phase 1 — Manual Setup Guide</h1>
 <p class="subtitle">Build the entire ingestion + RAG pipeline yourself, by hand, on a blank Windows machine.
-Every command, every expected output, and the <em>why</em> behind each step.</p>
+Every command, every expected output, and the <em>why</em> behind each step. <strong>Written for someone
+new to RAG and vector databases</strong> — Section 0 explains the concepts before any command.</p>
+
+<div class="box concept">
+<strong>New to this and want the deepest possible walkthrough?</strong> This page is the hands-on
+<em>runbook</em> (do-it-yourself commands). Its companion, the notebook
+<code>notebooks/phase1_deepdive.ipynb</code>, shows the same pipeline with the <em>real data</em>
+visible at every stage (raw HTML, before/after transforms, live database rows). Read Section 0 here
+first, then keep the notebook open beside you as you run the commands below.</div>
 
 <nav>
 <strong>Contents</strong>
-<ol>
+<ol start="0">
+  <li><a href="#s0">Concepts first — RAG, embeddings &amp; vector DBs (no jargon)</a></li>
   <li><a href="#s1">Install the prerequisites</a></li>
   <li><a href="#s2">Get the code &amp; create the Python environment</a></li>
   <li><a href="#s3">Start the database (Docker + Postgres + pgvector)</a></li>
@@ -69,6 +83,83 @@ Every command, every expected output, and the <em>why</em> behind each step.</p>
   <li><a href="#s10">Troubleshooting</a></li>
 </ol>
 </nav>
+
+<!-- ============================================================ -->
+<h2 id="s0">0 · Concepts first — RAG, embeddings &amp; vector DBs</h2>
+
+<p>Skip this section if you already build RAG systems. If you don't, five minutes here makes every
+command below make sense.</p>
+
+<h3>What are we building, in one picture?</h3>
+<p>A user asks a plain-English question about a company's financial filings and gets an answer where
+<strong>every sentence carries a citation</strong> to the real document — or the system <strong>refuses</strong>
+if it lacks the evidence. No invented facts. The technique that makes this possible is
+<strong>RAG — Retrieval-Augmented Generation</strong>:</p>
+
+<div class="box concept">
+<h3>RAG = an open-book exam</h3>
+Instead of asking a language model to answer <em>from memory</em> (a closed-book exam, where it will
+confidently invent a number it doesn't remember), we first <strong>retrieve</strong> the most relevant
+paragraphs from the real documents, paste them into the prompt, and say: <em>"answer using only this,
+and cite each claim."</em> Everything in Phase 1 exists to build that "open book" and to find the right
+page fast.</div>
+
+<h3>Jargon → concepts you may already know (this project uses a CV analogy)</h3>
+<div class="overflow">
+<table>
+<tr><th>If you know this (computer vision / ML)</th><th>…then this RAG term is the same idea</th></tr>
+<tr><td>A CNN turns an <strong>image</strong> into a <strong>feature vector</strong></td><td>An <em>embedding model</em> turns a <strong>paragraph</strong> into a vector</td></tr>
+<tr><td>Similar images → similar feature vectors</td><td>Similar <em>meanings</em> → similar text vectors</td></tr>
+<tr><td><strong>Cosine similarity</strong> to compare feature vectors</td><td>The exact same metric, to compare meaning</td></tr>
+<tr><td><strong>FAISS</strong> / a nearest-neighbour index</td><td>A <strong>vector database</strong> (here: Postgres + pgvector)</td></tr>
+<tr><td>Tiling a big image into <strong>patches</strong> before processing</td><td><strong>Chunking</strong> a 300-page document into passages</td></tr>
+</table>
+</div>
+
+<h3>What is an <em>embedding</em>?</h3>
+<p>A list of numbers (here, <strong>3072</strong> of them) that captures the <em>meaning</em> of a piece of
+text. The key property: texts with similar meaning get similar vectors <em>even if they share no words</em>.
+"loan loss provision" and "money set aside for bad loans" land close together; "rooftop garden" lands far away.
+<span class="analogy">Exactly like a CNN mapping similar images to nearby feature vectors — same idea, applied to text.</span></p>
+
+<h3>How is a <em>vector database</em> different from a normal database?</h3>
+<div class="overflow">
+<table>
+<tr><th></th><th>Traditional database (what most people know)</th><th>Vector database (what RAG needs)</th></tr>
+<tr><td>Stores</td><td>rows of numbers, dates, strings</td><td>rows <strong>plus</strong> high-dimensional vectors</td></tr>
+<tr><td>You ask it</td><td>"rows WHERE ticker = 'JPM'" (exact match)</td><td>"the 8 rows whose vector is <strong>nearest</strong> to <em>this</em> one"</td></tr>
+<tr><td>Question type</td><td>exact / filtering</td><td><strong>similarity</strong> / nearest-neighbour, ranked</td></tr>
+<tr><td>CV analogy</td><td>a plain SQL table</td><td>a <strong>FAISS</strong> index</td></tr>
+</table>
+</div>
+<p>The good news: we don't need an exotic new system. We use <strong>PostgreSQL</strong> (a rock-solid
+traditional database) plus an extension called <strong>pgvector</strong> that adds a <code>vector</code>
+column type and nearest-neighbour search. So <em>one</em> database does both jobs — exact filters
+(<code>WHERE ticker = 'JPM'</code>) <em>and</em> similarity search
+(<code>ORDER BY embedding &lt;=&gt; query_vector</code>, where <code>&lt;=&gt;</code> is pgvector's
+"distance between vectors" operator).</p>
+
+<h3>Why <em>chunking</em>?</h3>
+<p>Two reasons: (1) embedding models have an input-size limit — you can't turn a 112,000-character section
+into one vector; and (2) retrieval works best on <em>focused</em> passages — when someone asks about
+ransomware you want the paragraph about ransomware, not a 40-page section.
+<span class="analogy">You don't feed a 10,000×10,000 image to a network as one tensor — you tile it into
+patches. Chunking is tiling, for text.</span></p>
+
+<div class="box concept">
+<h3>One clarification that confuses everyone: HTML vs JSON</h3>
+The SEC gives us the filing as <strong>HTML</strong> (a <code>.htm</code> web page). The
+<code>.jsonl</code> files you'll see later (<code>JPM_10-K_2025-12-31.jsonl</code>) are <strong>not</strong>
+from the SEC — <em>we</em> create them, after cleaning and chunking. They are our processed output, not the
+raw input. (Separately, the SEC's <em>index</em> lookups — "which filings exist" — also return JSON, but the
+filing <em>content</em> is HTML.) In short: <strong>SEC gives HTML → our code produces JSON.</strong>
+</div>
+
+<p>That's the whole conceptual toolkit. The 8 steps below are just this picture, made real:</p>
+<pre><code>SEC EDGAR ──▶ 1.download HTML ─▶ 2.clean text ─▶ 3.split sections ─▶ 4.chunk (+tags)
+                                                                          │
+   answer ◀─ 8.LLM writes cited answer ◀─ 7.search DB ◀─ 6.embed ◀─ 5.store rows
+   (with citations)                        (nearest vectors)   vectors   in Postgres</code></pre>
 
 <!-- ============================================================ -->
 <h2 id="s1">1 · Install the prerequisites</h2>
@@ -199,7 +290,8 @@ BAC: 1 filings
 <li>Fetches <code>data.sec.gov/submissions/CIK0000019617.json</code> — the company's filing index — and
 filters to the requested forms and date range.</li>
 <li>Downloads each filing's primary document into <code>data/raw/&lt;TICKER&gt;/</code>
-(JPM's FY2025 10-K is ~12.9 MB of inline-XBRL HTML) with a JSON sidecar of filing metadata.</li>
+(JPM's FY2025 10-K is ~12.9 MB of inline-XBRL <strong>HTML</strong> — this is the raw input; see the
+HTML-vs-JSON note in Section 0) with a small JSON sidecar of filing metadata.</li>
 </ol>
 <p class="why">Compliance details baked in: a real User-Agent header (SEC requirement) and a
 throttle keeping requests under ~8/second (SEC caps at 10/s). Downloads are cached — rerunning is instant.</p>
@@ -314,8 +406,9 @@ are pay-per-token — idle costs nothing.</p>
 </div>
 
 <p style="margin-top:3rem; color: var(--muted); font-size:.9rem;">
-FinSight Phase 1 · <a style="color:var(--teal)" href="https://github.com/st186/finsight">github.com/st186/finsight</a> ·
-Companion deep-dive: <code>notebooks/phase1_walkthrough.ipynb</code></p>
+FinSight Phase 1 · <a style="color:var(--teal)" href="https://github.com/st186/finsight">github.com/st186/finsight</a><br>
+Companion notebooks: <code>notebooks/phase1_deepdive.ipynb</code> (beginner, real data at every step) ·
+<code>notebooks/phase1_walkthrough.ipynb</code> (concise)</p>
 
 </body>
 </html>
