@@ -8,3 +8,4 @@ psycopg[binary]>=3.2
 pgvector>=0.3
 tenacity>=8.3
 rich>=13.7
+sentence-transformers>=3.0
