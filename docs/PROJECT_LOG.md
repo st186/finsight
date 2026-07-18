@@ -140,10 +140,56 @@ genai / sec-edgar / pgvector.
 | Azure spend so far | a few dollars of the $200 credit |
 | Files committed | 28+ · public repo · 4 commits |
 
-## Next: Phase 2 — Retrieval quality & evaluation
+## 2026-07-18 — Phase 2: Retrieval quality & evaluation
 
-Golden dataset (~50 Q&A incl. deliberately unanswerable), RAGAS harness
-(faithfulness, relevancy, context precision/recall + custom hit rate),
-BM25 via the pre-staged `tsv` column + reciprocal rank fusion, cross-encoder
-reranker, query rewriting — every change measured against baseline. Plus:
-ingest the remaining 8 companies.
+**Corpus expansion.** Ingested the remaining 8 companies (13 filings total,
+some with two fiscal years). Three data-quality findings, all documented
+rather than hidden:
+- **Citi & Morgan Stanley parse as one giant "Item FULL" section** — they
+  format Item headings inside HTML tables, which the regex misses after
+  table-flattening. Content indexed; section filtering degraded.
+- **Wells Fargo's primary document is a ~150K-char wrapper** — the real
+  report lives in a separate exhibit file (incorporation by reference, in a
+  different *file*, unlike JPM's same-file variant). Exhibit fetching is
+  backlog.
+- Confirmed again: EDGAR's submissions API window (~1000 filings) hides
+  older 10-Ks for heavy filers.
+
+**The embedding saga, round 2.** The full-corpus embed hit trial-tier
+reality twice:
+1. Hard 429s killed the loader mid-file and per-file commits rolled back
+   Citi's progress → fix: wait out quota windows (10×65s) + **commit per
+   batch** so runs resume where they stopped.
+2. Then it sat in an endless 429 loop anyway — the 64-chunk batches
+   (~60-90K tokens) exceeded the deployment's entire per-minute budget, so
+   no wait could ever succeed → fix: **batch size 12**. Rows flowed
+   immediately; a TPM bump in the Azure portal then took throughput from
+   ~12 to ~330 chunks/min. Total: **2,845 chunks, 10 companies**.
+   (A progress monitor with a stall alarm now watches long loads — "alive"
+   and "making progress" are different things.)
+
+**Phase 2 infrastructure built and committed:**
+- **Hybrid search**: Postgres full-text (pre-staged `tsv` column) +
+  reciprocal rank fusion with the vector ranking.
+- **Cross-encoder reranker**: BAAI/bge-reranker-base on CPU —
+  sentence-transformers/PyTorch 2.13 installed *cleanly* on Python 3.14;
+  the feared wheel gap never materialized.
+- **Query rewriting**: mini-model expands vague questions into 2-3
+  filing-vocabulary sub-queries, all lists RRF-fused.
+- **Golden dataset**: 44 questions (18 single-fact, 6 section, 5
+  comparison, 6 temporal, 10 unanswerable), every answerable one grounded
+  in a verbatim phrase verified in the corpus *before* the question was
+  written.
+- **Eval harness**: deterministic retrieval hit rate + temporal citation
+  accuracy; LLM-judge faithfulness/relevancy; deterministic refusal check.
+- **Learning artifacts**: phase2_deepdive.ipynb, full_flow.ipynb (Phases
+  1+2 end-to-end), docs/phase2_manual_guide.html.
+
+**Eval-design lesson learned early:** the harness's first smoke test showed
+the reranker confidently surfacing JPM's *balance-sheet* chunks (Item 15)
+for a total-assets question while the golden phrase pinned the Item 1 prose
+wording — the fact lives in multiple places. Verbatim-phrase hit rate is
+deliberately strict; interpreting misses requires classifying them
+(corpus problem vs retrieval problem vs golden-set problem).
+
+*(Eval results table: pending the full run — recorded in README when done.)*

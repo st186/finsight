@@ -8,6 +8,7 @@ Phase 1 shipped vector-only `search()`. Phase 2 adds:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import psycopg
@@ -67,6 +68,23 @@ def vector_search(
     return [Hit(*row) for row in rows]
 
 
+_STOPWORDS = frozenset(
+    "the a an and or of to in on for with about what which how does did is are "
+    "was were according its their his her when where why who whom that this "
+    "these those say said each per most latest".split()
+)
+
+
+def _or_tsquery(query: str) -> str:
+    """OR-of-keywords fallback. websearch_to_tsquery ANDs every term, so a
+    long natural-language question matches almost nothing (eval finding:
+    14% hit rate). OR-ing the meaningful words restores recall; ts_rank_cd
+    still rewards chunks matching MORE of them."""
+    words = re.findall(r"[A-Za-z][A-Za-z0-9'-]{2,}", query.lower())
+    keep = [w for w in words if w not in _STOPWORDS]
+    return " | ".join(dict.fromkeys(keep)) or query
+
+
 def keyword_search(
     query: str,
     k: int = 8,
@@ -74,21 +92,32 @@ def keyword_search(
     items: list[str] | None = None,
 ) -> list[Hit]:
     """Sparse retrieval: Postgres full-text search over the generated tsv
-    column (BM25-family ranking via ts_rank_cd)."""
+    column. Strict AND semantics first (precise when it matches), then an
+    OR-of-keywords fallback to fill remaining slots (recall)."""
     where, params = _filters(tickers, items)
-    where.append("tsv @@ websearch_to_tsquery('english', %(q)s)")
-    params |= {"q": query, "k": k}
-    sql = f"""
-        SELECT id, citation, ticker, item, section_name, text,
-               ts_rank_cd(tsv, websearch_to_tsquery('english', %(q)s)) AS score
-        FROM chunks
-        WHERE {' AND '.join(where)}
-        ORDER BY score DESC
-        LIMIT %(k)s
-    """
-    with psycopg.connect(DATABASE_URL) as conn:
-        rows = conn.execute(sql, params).fetchall()
-    return [Hit(*row) for row in rows]
+    base_where = list(where)
+
+    def run(tsquery_fn: str, qparam: str, limit: int) -> list[Hit]:
+        w = base_where + [f"tsv @@ {tsquery_fn}('english', %(q)s)"]
+        sql = f"""
+            SELECT id, citation, ticker, item, section_name, text,
+                   ts_rank_cd(tsv, {tsquery_fn}('english', %(q)s)) AS score
+            FROM chunks
+            WHERE {' AND '.join(w)}
+            ORDER BY score DESC
+            LIMIT %(k)s
+        """
+        with psycopg.connect(DATABASE_URL) as conn:
+            rows = conn.execute(sql, {**params, "q": qparam, "k": limit}).fetchall()
+        return [Hit(*row) for row in rows]
+
+    hits = run("websearch_to_tsquery", query, k)
+    if len(hits) < k:
+        seen = {h.id for h in hits}
+        extra = [h for h in run("to_tsquery", _or_tsquery(query), k * 2)
+                 if h.id not in seen]
+        hits += extra[: k - len(hits)]
+    return hits
 
 
 def hybrid_search(
@@ -135,10 +164,25 @@ def retrieve(
     if mode == "hybrid":
         return hybrid_search(query, k, tickers, items)
     if mode == "hybrid+rerank":
+        # Eval finding: replacing the hybrid order with the pure cross-encoder
+        # order REGRESSED hit rate (74% vs 83%) — the CE sometimes demotes the
+        # phrase-bearing chunk in favor of plausible-looking neighbors. Fusing
+        # the two rankings (RRF again) keeps both signals.
         from retrieval.reranker import rerank  # lazy: torch import is slow
 
         candidates = hybrid_search(query, max(k * 3, 24), tickers, items)
-        return rerank(query, candidates, k)
+        ce_order = rerank(query, candidates, len(candidates))
+        fused: dict[int, float] = {}
+        by_id: dict[int, Hit] = {}
+        for ranking in (candidates, ce_order):
+            for rank, hit in enumerate(ranking):
+                fused[hit.id] = fused.get(hit.id, 0.0) + 1.0 / (RRF_K + rank + 1)
+                by_id.setdefault(hit.id, hit)
+        ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)[:k]
+        return [
+            Hit(h.id, h.citation, h.ticker, h.item, h.section_name, h.text, s)
+            for cid, s in ranked for h in [by_id[cid]]
+        ]
     if mode == "rewrite+hybrid+rerank":
         from retrieval.reranker import rerank
         from retrieval.rewriter import rewrite_query
