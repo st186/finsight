@@ -66,6 +66,13 @@ key in `.env`.
   raw data, live DB inspection
 - [notebooks/phase1_walkthrough.ipynb](notebooks/phase1_walkthrough.ipynb) —
   the concise version for readers already comfortable with RAG
+- [notebooks/phase2_deepdive.ipynb](notebooks/phase2_deepdive.ipynb) —
+  Phase 2 spoon-fed: golden dataset, hit rate, BM25 vs vector head-to-heads,
+  RRF worked example, cross-encoder reranking, the eval comparison
+- [notebooks/full_flow.ipynb](notebooks/full_flow.ipynb) — Phases 1+2 in one
+  continuous end-to-end tour
+- [docs/phase2_manual_guide.html](docs/phase2_manual_guide.html) — Phase 2
+  DIY runbook with concept primers and checkpoints
 
 ## Repository layout
 
