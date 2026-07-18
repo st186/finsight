@@ -192,4 +192,33 @@ wording — the fact lives in multiple places. Verbatim-phrase hit rate is
 deliberately strict; interpreting misses requires classifying them
 (corpus problem vs retrieval problem vs golden-set problem).
 
-*(Eval results table: pending the full run — recorded in README when done.)*
+**The eval runs — three rounds of measure → fix → re-measure:**
+
+| Mode | Round 1 | After fixes |
+|---|---|---|
+| vector (baseline) | 83% | 83% |
+| keyword | **14%** | **66%** (OR-of-keywords fallback after strict AND) |
+| hybrid (RRF) | 83% | 80% |
+| hybrid+rerank | **74%** (worse than no reranker!) | **83%** (blend CE ranking with hybrid via RRF instead of replacing) |
+| rewrite+hybrid+rerank | 74% (was accidentally using un-blended rerank) | **86% — winner** |
+
+Two findings demos would never have caught: naive Postgres FTS AND-semantics
+starved keyword recall to 14%, and adding a cross-encoder reranker *hurt*
+until its ranking was fused rather than substituted. One code-consistency
+bug (rewrite mode still calling the old pure-CE path) was diagnosed from
+its miss signature matching the pure-CE failure pattern.
+
+**Answer-level results (best mode): faithfulness 0.91, relevancy 1.00,
+refusals 10/10.** All PRD Phase 2 quality gates passed (Q1 ≥0.85 ✅,
+Q2 ≥0.80 ✅, Q4 ≥0.90 ✅).
+
+Remaining misses concentrate in multi-company comparisons (two filings'
+evidence must share one top-8) — the designed fix is Phase 3's supervisor
+decomposing questions per company.
+
+## Next: Phase 3 — Agents & orchestration (LangGraph)
+
+Supervisor routing (cheap model), RAG agent wrapping the Phase 2 retriever,
+quant agent over SEC XBRL company-facts (numbers never from model memory),
+synthesis agent, critic/verifier agent, human-in-the-loop interrupts,
+Postgres checkpointer.

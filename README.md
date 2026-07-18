@@ -6,11 +6,45 @@ agents, and MLOps on Azure. See `docs/` and the project plan PDF for the full
 
 ## Status
 
-- [x] **Phase 1 — Ingestion & baseline RAG** (code complete; needs Azure key + Docker to run end-to-end)
-- [ ] Phase 2 — Retrieval quality & evaluation
+- [x] **Phase 1 — Ingestion & baseline RAG** (verified end-to-end)
+- [x] **Phase 2 — Retrieval quality & evaluation** (see eval report below)
 - [ ] Phase 3 — Agents & orchestration (LangGraph)
 - [ ] Phase 4 — Productionization
 - [ ] Phase 5 — Azure deployment & MLOps
+
+## Phase 2 eval report
+
+Corpus: **2,845 chunks** from 13 10-K filings across 10 companies.
+Golden set: **45 questions** (35 answerable, phrase-grounded; 10 must be
+refused). Metric: hit rate = all expected verbatim phrases retrieved in
+top-8. Full harness: `python -m evals.run_evals`.
+
+| Retrieval mode | Hit rate | Temporal citation acc | Notes |
+|---|---|---|---|
+| vector (Phase 1 baseline) | 83% | 100% | strong on paraphrase, weak on exact IDs |
+| keyword (Postgres FTS) | 14% → **66%** | 17% → 100% | AND-semantics starved recall; fixed with OR-of-keywords fallback |
+| hybrid (RRF fusion) | 80% | 100% | union of both retrievers' strengths |
+| hybrid + cross-encoder rerank | 74% → **83%** | 100% | pure CE reordering *regressed*; fixed by RRF-blending CE with hybrid ranks |
+| **rewrite + hybrid + rerank** | **86%** | **100%** | best mode — LLM sub-queries rescue multi-wording facts |
+
+Two findings the harness caught that demos never would:
+1. **Naive keyword search scored 14%** — `websearch_to_tsquery` requires
+   every question word to match. The fix (strict AND, then OR-fallback)
+   took it to 66%.
+2. **Adding a reranker made retrieval worse** (83% → 74%) until its
+   ranking was *blended* with the hybrid ranking instead of replacing it.
+
+Remaining misses are concentrated in **multi-company comparison questions**
+(evidence from two filings must share one top-8) — the designed fix is
+Phase 3's supervisor decomposing per company.
+
+**Answer-level results** (best mode, `python -m evals.run_evals --answers`):
+
+| Metric | Result | PRD target |
+|---|---|---|
+| Faithfulness (LLM-judge, claims grounded in evidence) | **0.91** | ≥ 0.85 ✅ |
+| Answer relevancy | **1.00** | — |
+| Refusal correctness (10 deliberately unanswerable questions) | **10/10** | ≥ 0.90 ✅ |
 
 ## Phase 1 pipeline
 
