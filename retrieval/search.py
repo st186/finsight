@@ -139,6 +139,20 @@ def retrieve(
 
         candidates = hybrid_search(query, max(k * 3, 24), tickers, items)
         return rerank(query, candidates, k)
+    if mode == "rewrite+hybrid+rerank":
+        from retrieval.reranker import rerank
+        from retrieval.rewriter import rewrite_query
+
+        # retrieve for each sub-query, fuse all candidate lists by RRF
+        fused: dict[int, float] = {}
+        by_id: dict[int, Hit] = {}
+        for sub in rewrite_query(query):
+            for rank, hit in enumerate(hybrid_search(sub, CANDIDATES, tickers, items)):
+                fused[hit.id] = fused.get(hit.id, 0.0) + 1.0 / (RRF_K + rank + 1)
+                by_id.setdefault(hit.id, hit)
+        ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
+        candidates = [by_id[cid] for cid, _ in ranked[: max(k * 3, 24)]]
+        return rerank(query, candidates, k)
     raise ValueError(f"unknown retrieval mode: {mode}")
 
 

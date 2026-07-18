@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 
 import psycopg
-from openai import AzureOpenAI
+from openai import AzureOpenAI, RateLimitError
 from pgvector.psycopg import register_vector
 from rich.console import Console
 
@@ -38,8 +39,18 @@ def get_openai() -> AzureOpenAI:
 
 
 def embed_texts(client: AzureOpenAI, texts: list[str]) -> list[list[float]]:
-    resp = client.embeddings.create(model=EMBED_DEPLOYMENT, input=texts)
-    return [d.embedding for d in resp.data]
+    # Trial-tier deployments have low TPM; on a hard 429 the SDK's built-in
+    # retries can run out, so wait out the quota window ourselves.
+    for attempt in range(10):
+        try:
+            resp = client.embeddings.create(model=EMBED_DEPLOYMENT, input=texts)
+            return [d.embedding for d in resp.data]
+        except RateLimitError:
+            wait = 65
+            console.print(f"[yellow]429 rate limit — sleeping {wait}s "
+                          f"(attempt {attempt + 1}/10)[/yellow]")
+            time.sleep(wait)
+    raise RuntimeError("embedding rate limit persisted after 10 waits")
 
 
 def load_file(conn: psycopg.Connection, client: AzureOpenAI, path) -> int:
@@ -63,7 +74,7 @@ def load_file(conn: psycopg.Connection, client: AzureOpenAI, path) -> int:
                     {**chunk, "embedding": vec},
                 )
                 inserted += cur.rowcount
-    conn.commit()
+            conn.commit()  # per batch, so progress survives a crash
     return inserted
 
 
