@@ -22,9 +22,44 @@ See `docs/` and the project plan PDF for the full 10-week architecture.
 
 - [x] **Phase 1 — Ingestion & baseline RAG** (verified end-to-end)
 - [x] **Phase 2 — Retrieval quality & evaluation** (see eval report below)
-- [ ] Phase 3 — Agents & orchestration (LangGraph)
+- [x] **Phase 3 — Agents & orchestration (LangGraph)** (multi-agent demo below)
 - [ ] Phase 4 — Productionization
 - [ ] Phase 5 — Azure deployment & MLOps
+
+## Phase 3 multi-agent system
+
+A LangGraph supervisor decomposes a question and routes it to specialist
+agents; a critic verifies every claim before release; low-confidence answers
+pause for a human. State is checkpointed to Postgres (resumable + auditable).
+
+```
+supervisor ─▶ rag agent ─▶ quant agent ─▶ synthesis ─▶ critic ─▶ accept
+   (plan+route)  (Phase 2      (SEC XBRL       (cite-or-  │  ├─ retry (bounded)
+                  retrieval)     tool calls)    refuse)    │  └─ human-in-the-loop
+```
+
+```
+python -m agents.run "Compare the net interest income trend for JPMorgan
+    vs Bank of America since 2023, and what risks did management flag?"
+```
+
+Real trace from that query:
+
+```
+[supervisor] plan: 2 rag + 2 quant sub-tasks -> route=fanout
+[rag]        JPM / BAC risk-factor text -> 12 chunks
+[quant]      8 tool calls -> 6 figures from SEC XBRL
+[synthesis]  draft (9 passages, 6 figures)
+[critic]     ok, confidence=0.92
+[done]       answer accepted
+```
+
+Every **number** carries its SEC XBRL source (e.g. JPM net interest income
+$89.3B→$92.6B→$95.4B across 2023–25, matching the filings) and every
+**qualitative claim** carries its 10-K citation. The quant agent fetches
+figures from `data.sec.gov` — never from the model's memory. This directly
+answers the Phase 2 weak spot (multi-company comparison) by decomposing
+per company.
 
 ## Phase 2 eval report
 

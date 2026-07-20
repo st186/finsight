@@ -216,9 +216,53 @@ Remaining misses concentrate in multi-company comparisons (two filings'
 evidence must share one top-8) — the designed fix is Phase 3's supervisor
 decomposing questions per company.
 
-## Next: Phase 3 — Agents & orchestration (LangGraph)
+## 2026-07-20 — Phase 3: Agents & orchestration (LangGraph)
 
-Supervisor routing (cheap model), RAG agent wrapping the Phase 2 retriever,
-quant agent over SEC XBRL company-facts (numbers never from model memory),
-synthesis agent, critic/verifier agent, human-in-the-loop interrupts,
-Postgres checkpointer.
+Built the multi-agent system: `supervisor → rag → quant → synthesis →
+critic → {accept | retry | human}`, LangGraph with a Postgres checkpointer
+in the same `finsight-db`.
+
+**Nodes:** supervisor (mini model decomposes + routes; text-only questions
+skip the quant path — cost control); rag (wraps the Phase 2
+rewrite+hybrid+rerank retriever); quant (real OpenAI tool-calling loop over
+`tools/xbrl.py`); synthesis (cite-or-refuse, now also cites XBRL figure
+sources); critic (verifies every claim, bounded retry then HITL); graph +
+run CLI.
+
+**LangGraph 1.2.9 + langchain-core 1.4.9 install cleanly on Python 3.14.**
+
+**XBRL was the real work.** The SEC company-facts API is messier than the
+plan implies: the `frame` field (CY<year>) is too sparse for recent
+filings, so annual figures are keyed by the period-END year with
+form=10-K/fp=FY selection and latest-FILED dedup for restatements. Issuers
+also switch and vary US-GAAP tags — JPM moved from
+`InterestAndDividendIncomeOperating` to `InterestIncomeOperating`, and net
+interest income is reported directly as `InterestIncomeExpenseNet` (cleaner
+than income − expense). Fixed concept resolution to be year-aware (pick the
+candidate tag that actually covers the requested years) — that alone fixed
+AAPL/MSFT revenue returning null. Verified figures against the filings: JPM
+NII 89.3→92.6→95.4B, BAC 56.9→56.1→60.1B across 2023–25.
+
+**Best bug — the critic evidence asymmetry.** The critic initially flagged
+~10 "unsupported claim" issues on a perfectly good answer and never
+accepted it (looping to the HITL interrupt every time). Root cause: the
+synthesizer saw 1,200 chars per passage but the critic only saw **300** —
+so the supporting text was literally truncated out of the critic's view. It
+wasn't judging the answer, it was judging a smaller excerpt. Fix: give the
+critic the full passage text (2,500 chars, matching synthesis) and instruct
+it to accept faithful paraphrase rather than demand verbatim matches. Critic
+then accepted the same answer at confidence 0.92. A perfect illustration of
+why the critic is only as good as the evidence you show it.
+
+**Deliverable met:** the NIM-comparison demo produces a visible agent-hop
+trace, every number sourced to SEC XBRL and every claim cited, and the
+Postgres checkpointer wrote 8 checkpoints (one per hop) — resumable and
+auditable. HITL verified end-to-end: the graph pauses at `interrupt()` with
+a review payload and resumes from the checkpoint on the human's decision.
+
+## Next: Phase 4 — Productionization
+
+FastAPI (streaming SSE) + API-key auth; Langfuse tracing on every node
+(tokens/latency/cost per query); guardrails (prompt-injection scan on
+retrieved chunks, output PII scan, rate limits); multi-stage Dockerfile;
+`docker compose up` → API + Postgres + Langfuse.
