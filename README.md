@@ -1,8 +1,22 @@
-# FinSight
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/finsight-logo-dark.svg">
+    <img alt="FinSight" src="docs/assets/finsight-logo-light.svg" width="440">
+  </picture>
+</div>
 
-An agentic financial research assistant over SEC filings — RAG, LangGraph,
-agents, and MLOps on Azure. See `docs/` and the project plan PDF for the full
-10-week architecture.
+<p align="center">
+  <em>An agentic financial research assistant over SEC filings — RAG, LangGraph, agents, and MLOps on Azure.</em>
+</p>
+
+<p align="center">
+  <a href="#phase-2-eval-report"><img alt="retrieval hit rate 86%" src="https://img.shields.io/badge/retrieval%20hit%20rate-86%25-17838c"></a>
+  <a href="#phase-2-eval-report"><img alt="faithfulness 0.91" src="https://img.shields.io/badge/faithfulness-0.91-17838c"></a>
+  <img alt="Python 3.14" src="https://img.shields.io/badge/python-3.14-3776ab">
+  <img alt="Azure OpenAI" src="https://img.shields.io/badge/Azure-OpenAI-0078d4">
+</p>
+
+See `docs/` and the project plan PDF for the full 10-week architecture.
 
 ## Status
 
