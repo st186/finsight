@@ -119,8 +119,6 @@ key in `.env`.
   RRF worked example, cross-encoder reranking, the eval comparison
 - [notebooks/full_flow.ipynb](notebooks/full_flow.ipynb) — Phases 1+2 in one
   continuous end-to-end tour
-- [docs/phase2_manual_guide.html](docs/phase2_manual_guide.html) — Phase 2
-  DIY runbook with concept primers and checkpoints
 
 ## Repository layout
 

@@ -8,3 +8,4 @@ data/parsed/
 *.egg-info/
 docs/linkedin/
 docs/PROMPTS.md
+docs/*.html
