@@ -7,3 +7,4 @@ data/parsed/
 .pytest_cache/
 *.egg-info/
 docs/linkedin/
+docs/PROMPTS.md
