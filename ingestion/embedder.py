@@ -27,7 +27,10 @@ from config import (
 )
 
 console = Console()
-BATCH = 64  # chunks per embeddings API call
+# Small batches on purpose: a 64-chunk batch can exceed a trial-tier
+# deployment's entire per-minute token budget, producing endless 429s.
+# 12 chunks (~15K tokens) fits comfortably inside one quota window.
+BATCH = 12
 
 
 def get_openai() -> AzureOpenAI:

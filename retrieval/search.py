@@ -164,27 +164,9 @@ def retrieve(
     if mode == "hybrid":
         return hybrid_search(query, k, tickers, items)
     if mode == "hybrid+rerank":
-        # Eval finding: replacing the hybrid order with the pure cross-encoder
-        # order REGRESSED hit rate (74% vs 83%) — the CE sometimes demotes the
-        # phrase-bearing chunk in favor of plausible-looking neighbors. Fusing
-        # the two rankings (RRF again) keeps both signals.
-        from retrieval.reranker import rerank  # lazy: torch import is slow
-
         candidates = hybrid_search(query, max(k * 3, 24), tickers, items)
-        ce_order = rerank(query, candidates, len(candidates))
-        fused: dict[int, float] = {}
-        by_id: dict[int, Hit] = {}
-        for ranking in (candidates, ce_order):
-            for rank, hit in enumerate(ranking):
-                fused[hit.id] = fused.get(hit.id, 0.0) + 1.0 / (RRF_K + rank + 1)
-                by_id.setdefault(hit.id, hit)
-        ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)[:k]
-        return [
-            Hit(h.id, h.citation, h.ticker, h.item, h.section_name, h.text, s)
-            for cid, s in ranked for h in [by_id[cid]]
-        ]
+        return _blend_rerank(query, candidates, k)
     if mode == "rewrite+hybrid+rerank":
-        from retrieval.reranker import rerank
         from retrieval.rewriter import rewrite_query
 
         # retrieve for each sub-query, fuse all candidate lists by RRF
@@ -196,8 +178,32 @@ def retrieve(
                 by_id.setdefault(hit.id, hit)
         ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
         candidates = [by_id[cid] for cid, _ in ranked[: max(k * 3, 24)]]
-        return rerank(query, candidates, k)
+        return _blend_rerank(query, candidates, k)
     raise ValueError(f"unknown retrieval mode: {mode}")
+
+
+def _blend_rerank(query: str, candidates: list[Hit], k: int) -> list[Hit]:
+    """Cross-encoder reranking, blended with the incoming ranking by RRF.
+
+    Eval finding: REPLACING the hybrid order with the pure cross-encoder
+    order regressed hit rate (74% vs 83%) — the CE sometimes demotes the
+    phrase-bearing chunk in favor of plausible-looking neighbors. Fusing
+    the two rankings keeps both signals; a chunk must look bad to BOTH to
+    drop out of the top-k."""
+    from retrieval.reranker import rerank  # lazy: torch import is slow
+
+    ce_order = rerank(query, candidates, len(candidates))
+    fused: dict[int, float] = {}
+    by_id: dict[int, Hit] = {}
+    for ranking in (candidates, ce_order):
+        for rank, hit in enumerate(ranking):
+            fused[hit.id] = fused.get(hit.id, 0.0) + 1.0 / (RRF_K + rank + 1)
+            by_id.setdefault(hit.id, hit)
+    ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)[:k]
+    return [
+        Hit(h.id, h.citation, h.ticker, h.item, h.section_name, h.text, s)
+        for cid, s in ranked for h in [by_id[cid]]
+    ]
 
 
 # Backwards-compatible alias (Phase 1 API used by rag_cli / notebooks)
